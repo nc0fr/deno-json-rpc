@@ -1,0 +1,24 @@
+name: Check style
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: true
+      matrix:
+        deno_version: 
+          - v1.12.x
+    runs-on: ubuntu-latest
+    name: "Run Deno tests"
+    steps:
+      - uses: actions/checkout@v2
+      - name: Use Deno ${{ matrix.deno_version }}
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: ${{ matrix.deno_version }}
+      - name: Check format
+        run: |
+          deno fmt --check
