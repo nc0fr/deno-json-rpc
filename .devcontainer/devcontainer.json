@@ -9,7 +9,10 @@
 	
     // Add the IDs of extensions you want installed when the container is created.
     "extensions": [
-        "denoland.vscode-deno"
+        "denoland.vscode-deno",
+        "redhat.vscode-yaml",
+        "visualstudioexptteam.vscodeintellicode",
+        "cschleiden.vscode-github-actions"
     ],
 
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
