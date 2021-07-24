@@ -1,0 +1,27 @@
+name: Execute Deno tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: true
+      matrix:
+        deno_version: 
+          - v1.12.x
+    runs-on: ubuntu-latest
+    name: "Run Deno tests"
+    steps:
+      - uses: actions/checkout@v2
+      - name: Use Deno ${{ matrix.deno_version }}
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: ${{ matrix.deno_version }}
+      - name: Cache dependencies
+        run: |
+          deno cache --unstable deps.ts
+      - name: Run tests
+        run: |
+          deno test --unstable --allow-all src/
