@@ -78,8 +78,6 @@ export interface ErrorObject {
   data?: unknown;
 }
 
-// todo(n1c00o) !!! PREDEFINED ERRORS https://www.jsonrpc.org/specification#error_object !!!
-
 /**
  * When a rpc call is made, the Server **MUST** reply with a Response, except for in the case of Notifications.
  */
@@ -103,4 +101,18 @@ export interface ResponseObject {
     * If there was an error in detecting the id in the Request object (e.g. Parse error/Invalid Request), it **MUST** be `Null`.
     */
   id: ID;
+}
+
+/**
+ * The error codes from and including `-32768` to `-32000` are reserved for pre-defined errors.
+ * Any code within this range, but not defined explicitly below is reserved for future use.
+ * See https://www.jsonrpc.org/specification#error_object
+ */
+export enum PredefinedErrorCodes {
+  PARSE_ERROR = -32700,
+  INVALID_REQUEST = -32600,
+  METHOD_NOT_FOUND = -32601,
+  INVALID_PARAMS = -32602,
+  INTERNAL_ERROR = -32603,
+  // server error
 }
