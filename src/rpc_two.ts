@@ -57,7 +57,22 @@ export interface RequestObject {
  * Notifications are not confirmable by definition, since they do not have a Response object to be returned.
  * As such, the Client would not be aware of any errors (like e.g. "Invalid params","Internal error").
  */
-export type Notification = Omit<Request, "id">;
+export type Notification = {
+  /**
+   * A `String` specifying the version of the protocol. **MUST** be "2.0"
+   */
+  readonly jsonrpc: "2.0";
+  /**
+   * A `String` containing the name of the method to be invoked.
+   * Method names that begin with the word rpc followed by a period character (U+002E or ASCII 46)
+   * are reserved for rpc-internal methods and extensions and **MUST NOT** be used for anything else.
+   */
+  method: string;
+  /**
+   * A Structured value that holds the parameter values to be used during the invocation of the method. This member **MAY** be omitted.
+   */
+  params?: Parameters;
+};
 
 /**
  * When a rpc call encounters an error.
@@ -104,20 +119,6 @@ export interface ResponseObject {
 }
 
 /**
- * The error codes from and including `-32768` to `-32000` are reserved for pre-defined errors.
- * Any code within this range, but not defined explicitly below is reserved for future use.
- * See https://www.jsonrpc.org/specification#error_object
- */
-export enum PredefinedErrorCodes {
-  PARSE_ERROR = -32700,
-  INVALID_REQUEST = -32600,
-  METHOD_NOT_FOUND = -32601,
-  INVALID_PARAMS = -32602,
-  INTERNAL_ERROR = -32603,
-  // -32000 to -32099 are reserved for implemetation-defined server errors. See https://www.jsonrpc.org/specification#error_object
-}
-
-/**
  * Represents I/O
  */
 export interface IO {
@@ -136,7 +137,14 @@ export interface IO {
 /**
  * Type for listeners
  */
-export type ListenerFunction = () => unknown[];
+export type ListenerFunction = (
+  ...params: unknown[]
+) => unknown | Promise<unknown>;
+
+export interface UnresolvedRequest {
+  resolve(v: unknown): void;
+  reject(v: unknown): void;
+}
 
 /**
  * Represents a RPC Actor (Client/Server)
@@ -157,25 +165,55 @@ export interface RPC {
   /**
    * Functions to execute when receiving a request with a specific method
    */
-  _requestListeners: Map<string, ListenerFunction[]>;
+  _requestListeners: Map<string, ListenerFunction>;
   /**
    * Functions to execute when receiving a notification with a specific method
    */
-  _notificationListeners: Map<string, ListenerFunction[]>;
+  _notificationListeners: Map<string, ListenerFunction>;
+  /**
+   * Internal store of requests sent by this actor which are not resolved yet
+   */
+  _unresolvedRequests: Map<number, UnresolvedRequest>;
+  /**
+   * Internal function which handles received messages
+   * @param msg - received msg
+   * @returns Returns the response of a request, otherwise does not return
+   */
+  _handleMessage(msg: string): Promise<void | ResponseObject>;
+  /**
+   * Internal function which handles received requests
+   * @param msg - received msg
+   */
+  _handleRequest(msg: RequestObject): Promise<void>;
+  /**
+   * Internal function which handles received notifications
+   * @param msg - received msg
+   */
+  _handleNotification(msg: Notification): Promise<void>;
+  /**
+   * Internal function which handles received responses
+   * @param msg - received msg
+   */
+  _handleResponse(msg: ResponseObject): void;
+  /**
+   * Internal function to write to the Output
+   * @param msg - msg
+   */
+  _write(msg: unknown): Promise<void>;
   /**
    * Add a listener to execute when receiving a request
    * @param method - The method to attach the listener to
    * @param listener - The function to execute
    * @returns Index of the listener in the array
    */
-  addRequestListener(method: string, listener: ListenerFunction): void;
+  onRequest(method: string, listener: ListenerFunction): void;
   /**
    * Add a listener to execute when receiving a notification
    * @param method - The method to attach the listener to
    * @param listener - The function to execute
    * @returns Index of the listener in the array
    */
-  addNotificationListener(method: string, listener: ListenerFunction): void;
+  onNotification(method: string, listener: ListenerFunction): void;
   /**
    * Request the recipient
    * @param method - method
@@ -198,7 +236,7 @@ export interface RPC {
    * @param error - error. Set to `undefined` if no error occured
    */
   sendResponse(
-    id: number,
+    id: number | null,
     result: ResponseObject["result"],
     error: ResponseObject["error"],
   ): Promise<void>;
@@ -247,4 +285,239 @@ export interface RPC {
    * Stop the RPC
    */
   stop(): void;
+}
+
+// Using `function`-keyword allows us to access `this`
+/**
+ * Create a RPC actor
+ * @param io - I/O
+ */
+export function createRPC(io: IO): RPC {
+  return {
+    _io: io,
+    _isRunning: false,
+    _notificationListeners: new Map<string, ListenerFunction>(),
+    _requestID: 0,
+    _requestListeners: new Map<string, ListenerFunction>(),
+    _unresolvedRequests: new Map<number, UnresolvedRequest>(),
+
+    _handleMessage: async function (
+      msg: string,
+    ): Promise<void | ResponseObject> {
+      try {
+        const message = JSON.parse(msg);
+        // check if the message is a notification (no id), request (method + id) or an error (id + result/error)
+        if ("id" in message) {
+          if ("method" in message) {
+            await this._handleRequest(message);
+          } else {
+            return await this._handleResponse(message);
+          }
+        } else {
+          await this._handleNotification(message);
+        }
+      } catch (_error) {
+        // In case we can't parse the JSON
+        await this.sendResponse(null, undefined, this.createParseError());
+      }
+    },
+
+    _handleNotification: async function (
+      msg: Notification,
+    ): Promise<void> {
+      // On notification, the implemenation should not care about errors (Invalid method...)
+      if (!this._notificationListeners.has(msg.method)) return;
+      try {
+        await (this._notificationListeners.get(msg.method) as ListenerFunction)(
+          msg.params,
+        );
+      } catch (error) {
+        throw error;
+      }
+    },
+
+    _handleRequest: async function (
+      msg: RequestObject,
+    ): Promise<void> {
+      // we assume that every registered methods for requestListeners are all of the method the actor can receive
+      if (!this._requestListeners.has(msg.method)) {
+        await this.sendResponse(
+          Number(msg.id),
+          undefined,
+          this.createMethodNotFoundError(),
+        );
+      } else {
+        // we run the listener attached to the method
+        const listener: ListenerFunction = this._requestListeners.get(
+          msg.method,
+        ) as ListenerFunction;
+        try {
+          const result = await listener(msg.params);
+
+          await this.sendResponse(Number(msg.id), result, undefined);
+        } catch (error) {
+          await this.sendResponse(
+            Number(msg.id),
+            undefined,
+            this.createInternalError(),
+          );
+
+          throw error;
+        }
+      }
+    },
+
+    _handleResponse: function (
+      msg: ResponseObject,
+    ): void {
+      const storedRequest: UnresolvedRequest | undefined = this
+        ._unresolvedRequests.get(Number(msg.id));
+
+      if (storedRequest) {
+        "error" in msg
+          ? storedRequest.reject(msg.error)
+          : storedRequest.resolve(msg.result);
+        this._unresolvedRequests.delete(Number(msg.id));
+      }
+    },
+
+    _write: async function (msg: unknown): Promise<void> {
+      await this._io.write(JSON.stringify(msg));
+    },
+
+    onNotification: function (
+      method: string,
+      listener: ListenerFunction,
+    ): void {
+      if (this._notificationListeners.has(method)) {
+        throw new Error(
+          `Method ${method} already has a notification listener!`,
+        );
+      } else {
+        this._notificationListeners.set(method, listener);
+      }
+    },
+
+    onRequest: function (
+      method: string,
+      listener: ListenerFunction,
+    ): void {
+      if (this._requestListeners.has(method)) {
+        throw new Error(
+          `Method ${method} already has a request listener!`,
+        );
+      } else {
+        this._requestListeners.set(method, listener);
+      }
+    },
+
+    createError: function (
+      code: number,
+      message: string,
+      data: unknown,
+    ): ErrorObject {
+      return {
+        code,
+        message,
+        data,
+      };
+    },
+
+    createInternalError: function (): ErrorObject {
+      return {
+        code: -32603,
+        message: "Internal error",
+      };
+    },
+
+    createInvalidParamsError: function (): ErrorObject {
+      return {
+        code: -32602,
+        message: "Invalid params",
+      };
+    },
+
+    createInvalidRequestError: function (): ErrorObject {
+      return {
+        code: -32600,
+        message: "Invalid Request",
+      };
+    },
+
+    createMethodNotFoundError: function (): ErrorObject {
+      return {
+        code: -32601,
+        message: "Method not found",
+      };
+    },
+
+    createParseError: function (): ErrorObject {
+      return {
+        code: -32700,
+        message: "Parse error",
+      };
+    },
+
+    sendNotification: async function (
+      method: string,
+      params: Parameters | undefined,
+    ): Promise<void> {
+      const notification: Notification = {
+        jsonrpc: "2.0",
+        method,
+        params,
+      };
+      await this._write(notification);
+    },
+
+    sendRequest: function (
+      method: string,
+      params: Parameters | undefined,
+    ): Promise<void> {
+      this._requestID++;
+      const request: RequestObject = {
+        jsonrpc: "2.0",
+        id: this._requestID,
+        method,
+        params,
+      };
+
+      return new Promise((resolve, reject) => {
+        this._unresolvedRequests.set(this._requestID, { resolve, reject });
+        this._write(request);
+      });
+    },
+
+    sendResponse: async function (
+      id: number | null,
+      result: unknown,
+      error: ErrorObject | undefined,
+    ): Promise<void> {
+      const response: ResponseObject = {
+        jsonrpc: "2.0",
+        id,
+      };
+
+      if (error) {
+        response.error = error;
+      } else {
+        response.result = result || [];
+      }
+
+      await this._write(response);
+    },
+
+    start: async function (): Promise<void> {
+      this._isRunning = true;
+      while (true) {
+        if (!this._isRunning) break;
+        const msg = await this._io.read();
+        if (msg) this._handleMessage(msg);
+      }
+    },
+
+    stop: function (): void {
+      this._isRunning = false;
+    },
+  };
 }
