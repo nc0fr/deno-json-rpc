@@ -1,7 +1,7 @@
 /**
  * Parameters for the rpc call. **MUST be provided as a Structured value. Either by-position through an Array or by-name through an Object.
  */
-export type Parameters = unknown[] | Record<string, unknown>;
+export type Parameters = unknown | unknown[] | Record<string, unknown>;
 /**
  * Types for an ID
  * The value **SHOULD** normally not be `Null` [1] and `Numbers` **SHOULD NOT** contain fractional parts [2]
@@ -219,7 +219,10 @@ export interface RPC {
    * @param method - method
    * @param params - params
    */
-  sendRequest(method: string, params: RequestObject["params"]): Promise<void>;
+  sendRequest(
+    method: string,
+    params: RequestObject["params"],
+  ): Promise<UnresolvedRequest>;
   /**
    * Notify the recipient
    * @param method - method
@@ -473,7 +476,7 @@ export function createRPC(io: IO): RPC {
     sendRequest: function (
       method: string,
       params: Parameters | undefined,
-    ): Promise<void> {
+    ): Promise<UnresolvedRequest> {
       this._requestID++;
       const request: RequestObject = {
         jsonrpc: "2.0",
