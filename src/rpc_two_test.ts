@@ -1,7 +1,7 @@
 import { Buffer } from "../deps.ts";
 import { assertEquals } from "../dev_deps.ts";
 import { createRPC, RPC } from "./rpc_two.ts";
-import { createVSCodeIO, VSCodeIO } from "./vscode_io.ts";
+import { createVSCodeIO } from "./vscode_io.ts";
 
 /**
  * Internal function used to make test without repeating the same code
