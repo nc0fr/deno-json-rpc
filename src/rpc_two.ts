@@ -1,7 +1,7 @@
 /**
  * Parameters for the rpc call. **MUST be provided as a Structured value. Either by-position through an Array or by-name through an Object.
  */
-export type Parameter = unknown[] | Record<string, unknown>;
+export type Parameters = unknown[] | Record<string, unknown>;
 /**
  * Types for an ID
  * The value **SHOULD** normally not be `Null` [1] and `Numbers` **SHOULD NOT** contain fractional parts [2]
@@ -32,7 +32,7 @@ export interface RequestObject {
   /**
    * A Structured value that holds the parameter values to be used during the invocation of the method. This member **MAY** be omitted.
    */
-  params?: Parameter;
+  params?: Parameters;
   /**
    * An identifier established by the Client that **MUST** contain a `String`, `Number`, or `NULL` value if included.
    * If it is not included it is assumed to be a notification.
@@ -114,5 +114,137 @@ export enum PredefinedErrorCodes {
   METHOD_NOT_FOUND = -32601,
   INVALID_PARAMS = -32602,
   INTERNAL_ERROR = -32603,
-  // server error
+  // -32000 to -32099 are reserved for implemetation-defined server errors. See https://www.jsonrpc.org/specification#error_object
+}
+
+/**
+ * Represents I/O
+ */
+export interface IO {
+  /**
+   * Receive and resolve messages
+   * @returns the message
+   */
+  read(): Promise<string | void>;
+  /**
+   * Send a message
+   * @param message
+   */
+  write(message: string): Promise<void>;
+}
+
+/**
+ * Type for listeners
+ */
+export type ListenerFunction = () => unknown[];
+
+/**
+ * Represents a RPC Actor (Client/Server)
+ */
+export interface RPC {
+  /**
+   * I/O
+   */
+  _io: IO;
+  /**
+   * Whether or not the Actor is running
+   */
+  _isRunning: boolean;
+  /**
+   * ID of the last send request
+   */
+  _requestID: number;
+  /**
+   * Functions to execute when receiving a request with a specific method
+   */
+  _requestListeners: Map<string, ListenerFunction[]>;
+  /**
+   * Functions to execute when receiving a notification with a specific method
+   */
+  _notificationListeners: Map<string, ListenerFunction[]>;
+  /**
+   * Add a listener to execute when receiving a request
+   * @param method - The method to attach the listener to
+   * @param listener - The function to execute
+   * @returns Index of the listener in the array
+   */
+  addRequestListener(method: string, listener: ListenerFunction): void;
+  /**
+   * Add a listener to execute when receiving a notification
+   * @param method - The method to attach the listener to
+   * @param listener - The function to execute
+   * @returns Index of the listener in the array
+   */
+  addNotificationListener(method: string, listener: ListenerFunction): void;
+  /**
+   * Request the recipient
+   * @param method - method
+   * @param params - params
+   */
+  sendRequest(method: string, params: RequestObject["params"]): Promise<void>;
+  /**
+   * Notify the recipient
+   * @param method - method
+   * @param params - params
+   */
+  sendNotification(
+    method: string,
+    params: RequestObject["params"],
+  ): Promise<void>;
+  /**
+   * Reply to the recipient
+   * @param id - request id
+   * @param result - result. Set to `undefined` if an error occured
+   * @param error - error. Set to `undefined` if no error occured
+   */
+  sendResponse(
+    id: number,
+    result: ResponseObject["result"],
+    error: ResponseObject["error"],
+  ): Promise<void>;
+  /**
+   * Create a RPC error for a response.
+   * Some Errors are pre-defined by this implemenation or the protocol, use them instead of custom errors if they serve the same purprose!
+   * @param code - error code
+   * @param message - message
+   * @param data - Primitive or structured data in addition of the message (stack...)
+   */
+  createError(
+    code: ErrorObject["code"],
+    message: ErrorObject["message"],
+    data: ErrorObject["data"],
+  ): ErrorObject;
+  /**
+   * Create a Parse Error.
+   * See https://www.jsonrpc.org/specification#error_object
+   */
+  createParseError(): ErrorObject;
+  /**
+   * Create an Invalid Request error.
+   * See https://www.jsonrpc.org/specification#error_object
+   */
+  createInvalidRequestError(): ErrorObject;
+  /**
+   * Create an Method not found error.
+   * See https://www.jsonrpc.org/specification#error_object
+   */
+  createMethodNotFoundError(): ErrorObject;
+  /**
+   * Create an Invalid params error.
+   * See https://www.jsonrpc.org/specification#error_object
+   */
+  createInvalidParamsError(): ErrorObject;
+  /**
+   * Create an Internal error error.
+   * See https://www.jsonrpc.org/specification#error_object
+   */
+  createInternalError(): ErrorObject;
+  /**
+   * Start the RPC
+   */
+  start(): Promise<void>;
+  /**
+   * Stop the RPC
+   */
+  stop(): void;
 }
