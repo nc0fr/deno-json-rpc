@@ -32,8 +32,8 @@ export function createVSCodeIO(
     _lines: readLines(reader),
 
     read: async function (): Promise<string | void> {
-      const line = await lines.next();
-      if (line.done) return decoder.decode();
+      const line = await this._lines.next();
+      if (line.done) return this._decoder.decode();
       return line.value;
     },
 
