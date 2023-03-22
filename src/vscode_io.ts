@@ -9,6 +9,7 @@ export interface VSCodeIO extends IO {
   _decoder: TextDecoder;
   _reader: Deno.Reader;
   _writer: Deno.Writer;
+  _lines: AsyncIterableIterator<string>;
   write(message: string): Promise<void>;
   read(): Promise<string | void>;
 }
@@ -28,13 +29,12 @@ export function createVSCodeIO(
     _encoder: new TextEncoder(),
     _reader: reader,
     _writer: writer,
+    _lines: readLines(reader),
 
     read: async function (): Promise<string | void> {
-      for await (const line of readLines(this._reader)) {
-        return line;
-      }
-
-      return this._decoder.decode();
+      const line = await this._lines.next();
+      if (line.done) return this._decoder.decode();
+      return line.value;
     },
 
     write: async function (m: string): Promise<void> {
